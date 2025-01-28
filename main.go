@@ -68,7 +68,7 @@ func main() {
 		log.Fatalf("error writing output: %s", err)
 	}
 
-	log.Printf("output file written to %s%s%s\n", pwd, string(os.PathSeparator), outputFileName)
+	log.Printf("output file written to ===> %s%s%s\n", pwd, string(os.PathSeparator), outputFileName)
 }
 
 // attempt to load all packages
