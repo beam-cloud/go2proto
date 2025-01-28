@@ -34,8 +34,8 @@ func (i *arrFlags) Set(value string) error {
 var (
 	filter       = flag.String("filter", "", "Filter by struct names. Case insensitive.")
 	targetFolder = flag.String("f", ".", "Protobuf output file path.")
-	pkgFlags     arrFlags
 	packageName  = flag.String("n", "proto", "Package name")
+	pkgFlags     arrFlags
 )
 
 func main() {
@@ -52,7 +52,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	//ensure the path exists
+	// ensure the path exists
 	_, err = os.Stat(*targetFolder)
 	if err != nil {
 		log.Fatalf("error getting output file: %s", err)
@@ -85,6 +85,7 @@ func loadPackages(pwd string, pkgs []string) ([]*packages.Package, error) {
 		return nil, err
 	}
 	var errs = ""
+
 	//check each loaded package for errors during loading
 	for _, p := range packages {
 		if len(p.Errors) > 0 {
@@ -220,12 +221,12 @@ func writeOutput(msgs []*message, path string, packageName string) error {
 	msgTemplate := `syntax = "proto3";
 package {{.PackageName}};
 
-{{range .}}
+{{range .Messages}}
 message {{.Name}} {
 {{- range .Fields}}
 {{- if .IsRepeated}}
   repeated {{.TypeName}} {{.Name}} = {{.Order}};
-{{- else}}
+{{- else}}		
   {{.TypeName}} {{.Name}} = {{.Order}};
 {{- end}}
 {{- end}}
@@ -243,5 +244,8 @@ message {{.Name}} {
 	}
 	defer f.Close()
 
-	return tmpl.Execute(f, msgs)
+	return tmpl.Execute(f, map[string]interface{}{
+		"PackageName": packageName,
+		"Messages":    msgs,
+	})
 }
