@@ -35,6 +35,7 @@ var (
 	filter       = flag.String("filter", "", "Filter by struct names. Case insensitive.")
 	targetFolder = flag.String("f", ".", "Protobuf output file path.")
 	pkgFlags     arrFlags
+	packageName  = flag.String("package", "proto", "Package name")
 )
 
 func main() {
@@ -64,7 +65,7 @@ func main() {
 
 	msgs := getMessages(pkgs, strings.ToLower(*filter))
 
-	if err = writeOutput(msgs, *targetFolder); err != nil {
+	if err = writeOutput(msgs, *targetFolder, *packageName); err != nil {
 		log.Fatalf("error writing output: %s", err)
 	}
 
@@ -215,9 +216,9 @@ func toProtoFieldName(name string) string {
 	return string(unicode.ToLower(r)) + name[n:]
 }
 
-func writeOutput(msgs []*message, path string) error {
+func writeOutput(msgs []*message, path string, packageName string) error {
 	msgTemplate := `syntax = "proto3";
-package proto;
+package {{.PackageName}};
 
 {{range .}}
 message {{.Name}} {
