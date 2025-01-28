@@ -35,7 +35,7 @@ var (
 	filter       = flag.String("filter", "", "Filter by struct names. Case insensitive.")
 	targetFolder = flag.String("f", ".", "Protobuf output file path.")
 	pkgFlags     arrFlags
-	packageName  = flag.String("package", "proto", "Package name")
+	packageName  = flag.String("n", "proto", "Package name")
 )
 
 func main() {
