@@ -20,8 +20,6 @@ import (
 
 type arrFlags []string
 
-const outputFileName = "output.proto"
-
 func (i *arrFlags) String() string {
 	return ""
 }
@@ -32,10 +30,10 @@ func (i *arrFlags) Set(value string) error {
 }
 
 var (
-	filter       = flag.String("filter", "", "Filter by struct names. Case insensitive.")
-	targetFolder = flag.String("f", ".", "Protobuf output file path.")
-	packageName  = flag.String("n", "proto", "Package name")
-	pkgFlags     arrFlags
+	filter      = flag.String("filter", "", "Filter by struct names. Case insensitive.")
+	targetFile  = flag.String("f", ".", "Protobuf output file path.")
+	packageName = flag.String("n", "proto", "Package name")
+	pkgFlags    arrFlags
 )
 
 func main() {
@@ -52,12 +50,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ensure the path exists
-	_, err = os.Stat(*targetFolder)
-	if err != nil {
-		log.Fatalf("error getting output file: %s", err)
-	}
-
 	pkgs, err := loadPackages(pwd, pkgFlags)
 	if err != nil {
 		log.Fatalf("error fetching packages: %s", err)
@@ -65,11 +57,11 @@ func main() {
 
 	msgs := getMessages(pkgs, strings.ToLower(*filter))
 
-	if err = writeOutput(msgs, *targetFolder, *packageName); err != nil {
+	if err = writeOutput(msgs, *targetFile, *packageName); err != nil {
 		log.Fatalf("error writing output: %s", err)
 	}
 
-	log.Printf("output file written to ===> %s%s%s\n", pwd, string(os.PathSeparator), outputFileName)
+	log.Printf("output file written to ===> %s\n", *targetFile)
 }
 
 // attempt to load all packages
@@ -238,9 +230,10 @@ message {{.Name}} {
 		panic(err)
 	}
 
-	f, err := os.Create(filepath.Join(path, outputFileName))
+	os.MkdirAll(filepath.Dir(path), 0755)
+	f, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("unable to create file %s : %s", outputFileName, err)
+		return fmt.Errorf("unable to create file %s : %s", path, err)
 	}
 	defer f.Close()
 
