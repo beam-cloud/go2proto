@@ -109,6 +109,7 @@ type field struct {
 func getMessages(pkgs []*packages.Package, filter string) []*message {
 	var out []*message
 	seen := map[string]struct{}{}
+
 	for _, p := range pkgs {
 		for _, t := range p.TypesInfo.Defs {
 			if t == nil {
@@ -128,6 +129,7 @@ func getMessages(pkgs []*packages.Package, filter string) []*message {
 			}
 		}
 	}
+
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
