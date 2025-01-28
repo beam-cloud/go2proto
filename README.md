@@ -3,6 +3,7 @@
 Generate Protobuf messages from given go structs. No RPC, not gogo syntax, just pure Protobuf messages.
 
 ### Syntax
+
 ```
 -f string
     Protobuf output file path. (default ".")
@@ -17,8 +18,8 @@ Generate Protobuf messages from given go structs. No RPC, not gogo syntax, just 
 Your package you wish to export must be inside of your working directory. Package paths can be fully-qualified or relative.
 
 ```sh
-GO111MODULE=off go get -u github.com/anjmao/go2proto
-cd ~/go/src/github.com/anjmao/go2proto
+GO111MODULE=off go get -u github.com/beam-cloud/go2proto
+cd ~/go/src/github.com/beam-cloud/go2proto
 go2proto -f ./example/out -p ./example/in
 ```
 

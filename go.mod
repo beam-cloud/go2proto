@@ -1,4 +1,4 @@
-module github.com/anjmao/go2proto
+module github.com/beam-cloud/go2proto
 
 go 1.12
 
