@@ -57,32 +57,31 @@ func main() {
 		log.Fatalf("error fetching packages: %s", err)
 	}
 
-	// Collect both messages (from structs) and enums (from named string/int types).
+	// Collect types and potential enum definitions (though we'll collapse them to strings).
 	msgs, enums := getProtobufTypes(pkgs, strings.ToLower(*filter))
 
 	if err = writeOutput(msgs, enums, *targetFile, *packageName); err != nil {
 		log.Fatalf("error writing output: %s", err)
 	}
-
 	log.Printf("output file written to ===> %s\n", *targetFile)
 }
 
-// attempt to load all packages
+// loadPackages loads one or more packages and returns a slice of them.
 func loadPackages(pwd string, pkgs []string) ([]*packages.Package, error) {
 	fset := token.NewFileSet()
 	cfg := &packages.Config{
 		Dir:  pwd,
-		Mode: packages.LoadAllSyntax, // Make sure to include syntax so we have AST info
+		Mode: packages.LoadAllSyntax,
 		Fset: fset,
 	}
-	packages, err := packages.Load(cfg, pkgs...)
+
+	pkgsLoaded, err := packages.Load(cfg, pkgs...)
 	if err != nil {
 		return nil, err
 	}
 	var errs = ""
 
-	// check each loaded package for errors during loading
-	for _, p := range packages {
+	for _, p := range pkgsLoaded {
 		if len(p.Errors) > 0 {
 			errs += fmt.Sprintf("error fetching package %s: ", p.String())
 			for _, e := range p.Errors {
@@ -94,63 +93,51 @@ func loadPackages(pwd string, pkgs []string) ([]*packages.Package, error) {
 	if errs != "" {
 		return nil, errors.New(errs)
 	}
-	return packages, nil
+	return pkgsLoaded, nil
 }
 
-// ----------------------------------------------------------
-// Data structures for messages & enums
-// ----------------------------------------------------------
-
+// message represents a proto message (one Go struct).
 type message struct {
 	Name   string
 	Fields []*field
 }
 
+// field represents a field in a proto message.
 type field struct {
 	Name       string
 	TypeName   string
 	Order      int
 	IsRepeated bool
+	EnumValues []string
 }
 
-// enumDef holds information about an enum name + all of its variants
+// enumDef holds information about an enum name + all of its variants (as discovered in Go).
 type enumDef struct {
 	Name   string
 	Values []string
 }
 
-// ----------------------------------------------------------
-// getProtobufTypes: collects messages (structs) and enums
-// ----------------------------------------------------------
-
+// getProtobufTypes collects both struct-based messages and named types we treat as "enums".
 func getProtobufTypes(pkgs []*packages.Package, filter string) ([]*message, []*enumDef) {
 	var messages []*message
 	var enums []*enumDef
 
-	// This map will track enumerations by their fully qualified name,
-	// e.g. "github.com/foo/bar/pkg.ContainerStatus" => &enumDef{...}
+	// Map for enumerations: fullyQualifiedName -> *enumDef
 	enumMap := make(map[string]*enumDef)
 
-	// We do a single pass over all definitions:
 	for _, p := range pkgs {
-		fset := p.Fset // use the same FileSet used to parse the package
-
-		// We need to gather constants in each package so we can match them to named types
-		// We'll do this by scanning the AST (p.Syntax).
+		fset := p.Fset
+		// gatherConstValues: discover which named constants belong to which type
 		packageConstMap := gatherConstValues(p.Syntax)
 
-		// Now go through all definitions of named objects
+		// check each definition in the package
 		for _, def := range p.TypesInfo.Defs {
 			if def == nil {
 				continue
 			}
-
-			// Filter by @go2proto comment (struct or named type).
 			if !hasGo2ProtoComment(fset, def) {
 				continue
 			}
-
-			// If a name filter is specified, check it
 			if filter != "" && !strings.Contains(strings.ToLower(def.Name()), filter) {
 				continue
 			}
@@ -158,69 +145,44 @@ func getProtobufTypes(pkgs []*packages.Package, filter string) ([]*message, []*e
 			switch under := def.Type().Underlying().(type) {
 
 			case *types.Struct:
-				// We have a struct -> treat as a proto message
+				// It's a struct => build a proto message
 				s := under
 				msg := appendMessage(def, s)
 				messages = append(messages, msg)
 
 			case *types.Basic:
-				// Possibly an enum if it's a named type with underlying basic. E.g. "type X string"
-				// or "type X int" or "type X int32", etc.
-
-				// The named type is def.Type() (which is *types.Named).
+				// A named type that might be an enum-like type: "type X string", "type X int", etc.
 				named, ok := def.Type().(*types.Named)
 				if !ok {
 					continue
 				}
 
-				// For an enum, gather the constants that reference this type
-				enumValues := packageConstMap[def.Name()] // e.g. all constants with type ContainerStatus
-
+				// gather any associated constants
+				enumValues := packageConstMap[def.Name()]
 				if len(enumValues) == 0 {
-					// If there are no constants, we skip or just treat it as a string field.
-					// But user specifically wants an enum, so we skip if no constants found.
 					continue
 				}
 
-				// Create an enum definition
 				ed := &enumDef{
-					Name:   named.Obj().Name(), // The type's name, e.g. "ContainerStatus"
+					Name:   named.Obj().Name(),
 					Values: enumValues,
 				}
-
-				fullyQualified := def.Type().String() // e.g. "github.com/foo/bar/pkg.ContainerStatus"
+				fullyQualified := def.Type().String()
 				enumMap[fullyQualified] = ed
 				enums = append(enums, ed)
-
-			default:
-				// Other underlying types could appear, but if it has @go2proto,
-				// maybe user wants it as something else. For simplicity, do nothing here.
 			}
 		}
 	}
 
-	// Sort messages/enums for stable output
+	// sort for stable output
 	sort.Slice(messages, func(i, j int) bool { return messages[i].Name < messages[j].Name })
 	sort.Slice(enums, func(i, j int) bool { return enums[i].Name < enums[j].Name })
 
-	// We also want to ensure that when we produce message fields referencing these enumerations,
-	// they come out as the proto enum name. So we need a global reference in toProtoFieldTypeName.
 	collectEnumMap(enumMap)
-
 	return messages, enums
 }
 
-// gatherConstValues scans AST files for const blocks, capturing constants for each named type.
-// For example:
-//
-// const (
-//
-//	ContainerStatusPending  ContainerStatus = "PENDING"
-//	ContainerStatusRunning  ContainerStatus = "RUNNING"
-//
-// )
-//
-// This will return: map["ContainerStatus"]{"PENDING", "RUNNING"}
+// gatherConstValues scans AST for const blocks, collecting any constants declared with a named type.
 func gatherConstValues(files []*ast.File) map[string][]string {
 	result := make(map[string][]string)
 	for _, f := range files {
@@ -236,20 +198,12 @@ func gatherConstValues(files []*ast.File) map[string][]string {
 				}
 				var typeName string
 				if vspec.Type != nil {
-					// If the const has an explicit type like 'ContainerStatus'
 					if ident, ok := vspec.Type.(*ast.Ident); ok {
-						typeName = ident.Name // e.g. "ContainerStatus"
+						typeName = ident.Name
 					}
 				}
-				// If we have multiple names in that block, each might share the same type.
 				for _, name := range vspec.Names {
-					if typeName == "" && vspec.Type == nil {
-						// Could be a "typed" constant from iota block, or an untyped constant.
-						// If so, we can't reliably detect the enumerated type unless we do more type-checking.
-						continue
-					}
-					// If we found a typeName, store the constant name (e.g. "ContainerStatusPending")
-					// This might be "PENDING" or something else, depending on your style.
+					// if no typeName, we skip
 					if typeName != "" {
 						result[typeName] = append(result[typeName], name.Name)
 					}
@@ -260,61 +214,47 @@ func gatherConstValues(files []*ast.File) map[string][]string {
 	return result
 }
 
-// ----------------------------------------------------------
-// We store a global map from fully-qualified name => *enumDef
-// so that toProtoFieldTypeName can swap them out when needed
-// ----------------------------------------------------------
-
+// globalEnumMap allows us to detect if a field belongs to a recognized enum type.
 var globalEnumMap = make(map[string]*enumDef)
 
+// collectEnumMap merges the discovered "enumMap" into our global map for toProtoFieldTypeName.
 func collectEnumMap(enumMap map[string]*enumDef) {
 	for k, v := range enumMap {
 		globalEnumMap[k] = v
 	}
 }
 
-// ----------------------------------------------------------
-// hasGo2ProtoComment uses the package's FileSet to parse AST
-// for comments
-// ----------------------------------------------------------
-
+// hasGo2ProtoComment checks if the type has a "@go2proto" annotation above it.
 func hasGo2ProtoComment(fset *token.FileSet, t types.Object) bool {
 	pos := t.Pos()
 	if !pos.IsValid() {
 		return false
 	}
-
 	position := fset.Position(pos)
 	if position.Filename == "" {
 		return false
 	}
 
-	// Parse the file containing the object
 	file, err := parser.ParseFile(fset, position.Filename, nil, parser.ParseComments)
 	if err != nil {
 		return false
 	}
 
-	// Traverse the AST to find a declaration for t.Name()
 	for _, decl := range file.Decls {
 		genDecl, ok := decl.(*ast.GenDecl)
 		if !ok {
 			continue
 		}
-		switch genDecl.Tok {
-		case token.TYPE:
+		if genDecl.Tok == token.TYPE {
 			for _, spec := range genDecl.Specs {
 				typeSpec, ok := spec.(*ast.TypeSpec)
 				if !ok {
 					continue
 				}
-				if typeSpec.Name.Name == t.Name() {
-					// Check if @go2proto is in the doc
-					if genDecl.Doc != nil {
-						for _, comment := range genDecl.Doc.List {
-							if strings.Contains(comment.Text, "@go2proto") {
-								return true
-							}
+				if typeSpec.Name.Name == t.Name() && genDecl.Doc != nil {
+					for _, comment := range genDecl.Doc.List {
+						if strings.Contains(comment.Text, "@go2proto") {
+							return true
 						}
 					}
 				}
@@ -324,40 +264,38 @@ func hasGo2ProtoComment(fset *token.FileSet, t types.Object) bool {
 	return false
 }
 
-// ----------------------------------------------------------
-// Building messages from struct definitions
-// ----------------------------------------------------------
-
+// appendMessage builds a "message" object from a struct.
 func appendMessage(def types.Object, s *types.Struct) *message {
 	msg := &message{
 		Name:   def.Name(),
 		Fields: make([]*field, 0, s.NumFields()),
 	}
 	for i := 0; i < s.NumFields(); i++ {
-		f := s.Field(i)
-		if !f.Exported() {
+		fld := s.Field(i)
+		if !fld.Exported() {
 			continue
 		}
-		newField := &field{
-			Name:       toProtoFieldName(f.Name()),
-			TypeName:   toProtoFieldTypeName(f),
-			IsRepeated: isRepeated(f),
+		fd := &field{
+			Name:       toProtoFieldName(fld.Name()),
 			Order:      i + 1,
+			IsRepeated: isRepeated(fld),
 		}
-		msg.Fields = append(msg.Fields, newField)
+
+		// determine the type name (may become "string" if recognized as an enum)
+		fd.TypeName = toProtoFieldTypeName(fld, fd)
+
+		msg.Fields = append(msg.Fields, fd)
 	}
 	return msg
 }
 
-// ----------------------------------------------------------
-// Type name resolution: Repeated logic + field type logic
-// ----------------------------------------------------------
-
+// isRepeated returns true if the field is a slice.
 func isRepeated(f *types.Var) bool {
 	_, ok := f.Type().Underlying().(*types.Slice)
 	return ok
 }
 
+// toProtoFieldName transforms the Go field name into a proto-like camel-case.
 func toProtoFieldName(name string) string {
 	if len(name) == 2 {
 		return strings.ToLower(name)
@@ -366,39 +304,41 @@ func toProtoFieldName(name string) string {
 	return string(unicode.ToLower(r)) + name[n:]
 }
 
-// toProtoFieldTypeName determines how a Go type maps to a proto type name.
-// This is extended to handle known enumerations in globalEnumMap.
-func toProtoFieldTypeName(f *types.Var) string {
-	t := f.Type()
-	fullyQualified := t.String() // e.g. "github.com/beam-cloud/beta9/pkg/types.ContainerStatus"
-
-	// If this type is a known enum, just return the enum's short name.
+// processEnumIfAny returns the possible values of the field's type if it's recognized as an enum.
+func processEnumIfAny(t types.Type) []string {
+	fullyQualified := t.String()
 	if enumDef, ok := globalEnumMap[fullyQualified]; ok {
-		return enumDef.Name // e.g. "ContainerStatus"
+		return enumDef.Values
+	}
+	return nil
+}
+
+// toProtoFieldTypeName checks the field's type; if it's recognized as an enum, treat it as a string.
+func toProtoFieldTypeName(f *types.Var, fd *field) string {
+	t := f.Type()
+
+	if vals := processEnumIfAny(t); vals != nil {
+		// store recognized enum values for reference
+		fd.EnumValues = vals
+		// but collapse the actual type to "string"
+		return "string"
 	}
 
 	switch under := t.Underlying().(type) {
 	case *types.Basic:
-		// Normal int, float, string, etc.
 		return normalizeType(under.String())
-
 	case *types.Slice:
-		// repeated type
 		name := splitNameHelper(f)
 		return normalizeType(strings.TrimLeft(name, "[]"))
-
 	case *types.Pointer, *types.Struct:
-		// pointers or embedded struct references
 		name := splitNameHelper(f)
 		return normalizeType(name)
-
 	default:
 		return t.String()
 	}
 }
 
-// splitNameHelper extracts the last component of the type's string() representation,
-// e.g. "github.com/foo/pkg.MyType" -> "MyType", removing '*' or '[]' if present.
+// splitNameHelper extracts the final portion of the type by splitting on "." and trimming "*" or "[]".
 func splitNameHelper(f *types.Var) string {
 	parts := strings.Split(f.Type().String(), ".")
 	name := parts[len(parts)-1]
@@ -407,7 +347,7 @@ func splitNameHelper(f *types.Var) string {
 	return name
 }
 
-// normalizeType handles standard conversions.
+// normalizeType shrinks certain root types into their proto equivalents.
 func normalizeType(name string) string {
 	switch name {
 	case "int":
@@ -423,23 +363,21 @@ func normalizeType(name string) string {
 	}
 }
 
-func writeOutput(msgs []*message, enums []*enumDef, path string, packageName string) error {
+// writeOutput produces the .proto file, omitting actual enum blocks, but adding comments above fields.
+func writeOutput(msgs []*message, _ []*enumDef, path string, packageName string) error {
 	const msgTemplate = `syntax = "proto3";
 package {{.PackageName}};
 
-// Enums
-{{range .Enums}}
-enum {{.Name}} {
-{{- range $i, $val := .Values}}
-  {{ $val }} = {{ $i }};
-{{- end}}
-}
-{{end}}
+// We are collapsing any enum-like types into plain strings.
+// If a field previously recognized as an enum has known values,
+// we'll show them in a comment.
 
-// Messages
 {{range .Messages}}
 message {{.Name}} {
 {{- range .Fields}}
+{{- if .EnumValues}}
+// possible values: {{ range $i, $val := .EnumValues }}{{if $i}}, {{end}}{{ $val }}{{ end }}
+{{- end}}
 {{- if .IsRepeated}}
   repeated {{.TypeName}} {{.Name}} = {{.Order}};
 {{- else}}
@@ -455,7 +393,9 @@ message {{.Name}} {
 		return fmt.Errorf("unable to parse template: %w", err)
 	}
 
-	os.MkdirAll(filepath.Dir(path), 0755)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("failed to create directory structure: %w", err)
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("unable to create file %s: %w", path, err)
@@ -465,7 +405,6 @@ message {{.Name}} {
 	data := map[string]interface{}{
 		"PackageName": packageName,
 		"Messages":    msgs,
-		"Enums":       enums,
 	}
 
 	if err := tmpl.Execute(f, data); err != nil {
