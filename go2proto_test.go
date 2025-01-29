@@ -22,9 +22,13 @@ func TestGetMessages(t *testing.T) {
 		t.Fatalf("error loading packages: %s", err)
 	}
 
-	msgs := getMessages(pkgs, "")
+	msgs, enums := getProtobufTypes(pkgs, "")
 
 	for _, msg := range msgs {
 		t.Logf("message: %s", msg.Name)
+	}
+
+	for _, enum := range enums {
+		t.Logf("enum: %s", enum.Name)
 	}
 }
