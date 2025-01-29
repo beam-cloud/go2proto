@@ -35,8 +35,8 @@ func (i *arrFlags) Set(value string) error {
 var (
 	filter           = flag.String("filter", "", "Filter by struct (or type) names. Case insensitive.")
 	targetFile       = flag.String("f", ".", "Protobuf output file path.")
-	goPackageName    = flag.String("n", "proto", "Go package name")
-	protoPackageName = flag.String("p", "proto", "Protobuf package name")
+	goPackageName    = flag.String("n", "package", "Go package name")
+	protoPackageName = flag.String("t", "package", "Protobuf package name")
 	pkgFlags         arrFlags
 )
 
