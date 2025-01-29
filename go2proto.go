@@ -14,9 +14,8 @@ import (
 	"sort"
 	"strings"
 	"text/template"
-	"unicode"
-	"unicode/utf8"
 
+	"github.com/iancoleman/strcase"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -315,13 +314,9 @@ func isRepeated(f *types.Var) bool {
 	return ok
 }
 
-// toProtoFieldName transforms the Go field name into a proto-like camel-case.
+// toProtoFieldName transforms the Go field name into snake_case for proto using strcase.
 func toProtoFieldName(name string) string {
-	if len(name) == 2 {
-		return strings.ToLower(name)
-	}
-	r, n := utf8.DecodeRuneInString(name)
-	return string(unicode.ToLower(r)) + name[n:]
+	return strcase.ToSnake(name)
 }
 
 // processEnumIfAny returns the possible values of the field's type if it's recognized as an enum.
