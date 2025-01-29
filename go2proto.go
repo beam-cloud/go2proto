@@ -15,6 +15,9 @@ import (
 	"strings"
 	"text/template"
 
+	"unicode"
+
+	"github.com/iancoleman/strcase"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -320,31 +323,21 @@ func isRepeated(f *types.Var) bool {
 	return ok
 }
 
-// toProtoFieldName transforms the Go field name into snake_case for proto without treating numbers as word boundaries.
+// toProtoFieldName transforms the Go field name into snake_case for proto, handling numbers correctly.
 func toProtoFieldName(name string) string {
+	// Use strcase to convert to snake_case
+	snake := strcase.ToSnake(name)
+
+	// Adjust for numbers: remove underscores before numbers
 	var result []rune
-	for i, r := range name {
-		if i > 0 && isUpper(r) && (isLower(rune(name[i-1])) || isLower(rune(name[i+1]))) {
-			result = append(result, '_')
+	for i, r := range snake {
+		if unicode.IsDigit(r) && i > 0 && result[len(result)-1] == '_' {
+			result = result[:len(result)-1] // Remove the underscore before a digit
 		}
-		result = append(result, toLower(r))
+		result = append(result, r)
 	}
+
 	return string(result)
-}
-
-func isUpper(r rune) bool {
-	return r >= 'A' && r <= 'Z'
-}
-
-func isLower(r rune) bool {
-	return r >= 'a' && r <= 'z'
-}
-
-func toLower(r rune) rune {
-	if isUpper(r) {
-		return r + ('a' - 'A')
-	}
-	return r
 }
 
 // processEnumIfAny returns the possible values of the field's type if it's recognized as an enum.
