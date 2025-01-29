@@ -122,15 +122,14 @@ func getProtobufTypes(pkgs []*packages.Package, filter string) ([]*message, []*e
 	var messages []*message
 	var enums []*enumDef
 
-	// Map for enumerations: fullyQualifiedName -> *enumDef
+	// Map for enumerations: typeName -> *enumDef
 	enumMap := make(map[string]*enumDef)
 
+	// **First Pass: Collect all enum-like types**
 	for _, p := range pkgs {
 		fset := p.Fset
-		// gatherConstValues: discover which named constants belong to which type
 		packageConstMap := gatherConstValues(p.Syntax)
 
-		// check each definition in the package
 		for _, def := range p.TypesInfo.Defs {
 			if def == nil {
 				continue
@@ -142,43 +141,53 @@ func getProtobufTypes(pkgs []*packages.Package, filter string) ([]*message, []*e
 				continue
 			}
 
-			switch under := def.Type().Underlying().(type) {
+			// **Check if the type is a named type with a basic underlying type**
+			if named, ok := def.Type().(*types.Named); ok {
+				if _, ok := named.Underlying().(*types.Basic); ok {
+					enumValues := packageConstMap[def.Name()]
+					if len(enumValues) == 0 {
+						continue
+					}
 
-			case *types.Struct:
-				// It's a struct => build a proto message
-				s := under
-				msg := appendMessage(def, s)
-				messages = append(messages, msg)
-
-			case *types.Basic:
-				// A named type that might be an enum-like type: "type X string", "type X int", etc.
-				named, ok := def.Type().(*types.Named)
-				if !ok {
-					continue
+					ed := &enumDef{
+						Name:   named.Obj().Name(),
+						Values: enumValues,
+					}
+					typeName := named.Obj().Name() // Use type name as the key
+					enumMap[typeName] = ed
+					enums = append(enums, ed)
 				}
-
-				// gather any associated constants
-				enumValues := packageConstMap[def.Name()]
-				if len(enumValues) == 0 {
-					continue
-				}
-
-				ed := &enumDef{
-					Name:   named.Obj().Name(),
-					Values: enumValues,
-				}
-				fullyQualified := def.Type().String()
-				enumMap[fullyQualified] = ed
-				enums = append(enums, ed)
 			}
 		}
 	}
 
-	// sort for stable output
+	// **Populate the globalEnumMap with collected enums**
+	collectEnumMap(enumMap)
+
+	// **Second Pass: Process structs and their fields**
+	for _, p := range pkgs {
+		for _, def := range p.TypesInfo.Defs {
+			if def == nil {
+				continue
+			}
+			if !hasGo2ProtoComment(p.Fset, def) {
+				continue
+			}
+			if filter != "" && !strings.Contains(strings.ToLower(def.Name()), filter) {
+				continue
+			}
+
+			if s, ok := def.Type().Underlying().(*types.Struct); ok {
+				msg := appendMessage(def, s)
+				messages = append(messages, msg)
+			}
+		}
+	}
+
+	// Sort for stable output
 	sort.Slice(messages, func(i, j int) bool { return messages[i].Name < messages[j].Name })
 	sort.Slice(enums, func(i, j int) bool { return enums[i].Name < enums[j].Name })
 
-	collectEnumMap(enumMap)
 	return messages, enums
 }
 
@@ -209,12 +218,14 @@ func gatherConstValues(files []*ast.File) map[string][]string {
 				for i, name := range vspec.Names {
 					// Default to the identifier name in case there's no assigned value
 					valStr := name.Name
+
 					// If we have a literal and it's a string, take that as the actual value
 					if i < len(vspec.Values) {
 						if lit, ok := vspec.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
 							valStr = strings.Trim(lit.Value, `"`)
 						}
 					}
+
 					result[typeName] = append(result[typeName], valStr)
 				}
 			}
@@ -315,9 +326,11 @@ func toProtoFieldName(name string) string {
 
 // processEnumIfAny returns the possible values of the field's type if it's recognized as an enum.
 func processEnumIfAny(t types.Type) []string {
-	fullyQualified := t.String()
-	if enumDef, ok := globalEnumMap[fullyQualified]; ok {
-		return enumDef.Values
+	if named, ok := t.(*types.Named); ok {
+		typeName := named.Obj().Name()
+		if enumDef, exists := globalEnumMap[typeName]; exists {
+			return enumDef.Values
+		}
 	}
 	return nil
 }
@@ -327,9 +340,7 @@ func toProtoFieldTypeName(f *types.Var, fd *field) string {
 	t := f.Type()
 
 	if vals := processEnumIfAny(t); vals != nil {
-		// store recognized enum values for reference
 		fd.EnumValues = vals
-		// but collapse the actual type to "string"
 		return "string"
 	}
 

@@ -36,10 +36,19 @@ type ArrayOfEventFieldItem struct {
 }
 
 // @go2proto
+type EventFieldItemType string
+
+const (
+	EventFieldItemTypeText  EventFieldItemType = "text"
+	EventFieldItemTypeFloat EventFieldItemType = "float"
+)
+
+// @go2proto
 type EventFieldItem struct {
 	EventFieldItemID string
 	Text             string
 	Rank             int32
 	FloatField1      float32
 	FloatField2      float64
+	ItemType         EventFieldItemType
 }
