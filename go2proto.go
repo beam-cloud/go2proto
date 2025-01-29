@@ -445,6 +445,7 @@ message {{.Name}} {
 {{- else}}
   {{.TypeName}} {{.Name}} = {{.Order}};
 {{- end}}
+{{- end}}
 }
 {{end}}
 `
