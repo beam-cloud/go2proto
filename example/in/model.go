@@ -2,6 +2,7 @@ package in
 
 type User struct{}
 
+// @go2proto
 type EventSubForm struct {
 	ID               string
 	Caption          string
@@ -12,10 +13,12 @@ type EventSubForm struct {
 	SliceInt         []int
 }
 
+// @go2proto
 type ArrayOfEventField struct {
 	EventField []*EventField
 }
 
+// @go2proto
 type EventField struct {
 	ID               string
 	Name             string
@@ -27,10 +30,12 @@ type EventField struct {
 	CustomFieldOrder int32
 }
 
+// @go2proto
 type ArrayOfEventFieldItem struct {
 	EventFieldItem []*EventFieldItem
 }
 
+// @go2proto
 type EventFieldItem struct {
 	EventFieldItemID string
 	Text             string

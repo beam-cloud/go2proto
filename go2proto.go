@@ -4,6 +4,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"go/ast"
+	"go/parser"
 	"go/token"
 	"go/types"
 	"log"
@@ -115,16 +117,14 @@ func getMessages(pkgs []*packages.Package, filter string) []*message {
 			if t == nil {
 				continue
 			}
-			if !t.Exported() {
-				continue
-			}
-			if _, ok := seen[t.Name()]; ok {
-				continue
-			}
+
+			// Check if the object is a struct and has a // @go2proto comment
 			if s, ok := t.Type().Underlying().(*types.Struct); ok {
-				seen[t.Name()] = struct{}{}
-				if filter == "" || strings.Contains(strings.ToLower(t.Name()), filter) {
-					out = appendMessage(out, t, s)
+				if hasGo2ProtoComment(p.Fset, t) {
+					seen[t.Name()] = struct{}{}
+					if filter == "" || strings.Contains(strings.ToLower(t.Name()), filter) {
+						out = appendMessage(out, t, s)
+					}
 				}
 			}
 		}
@@ -132,6 +132,51 @@ func getMessages(pkgs []*packages.Package, filter string) []*message {
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// Function to check if a struct has the @go2proto comment
+func hasGo2ProtoComment(fset *token.FileSet, t types.Object) bool {
+	// Get the position of the object
+	pos := t.Pos()
+	if !pos.IsValid() {
+		return false
+	}
+
+	// Use the provided FileSet to get the position
+	position := fset.Position(pos)
+
+	// Parse the file containing the object
+	file, err := parser.ParseFile(fset, position.Filename, nil, parser.ParseComments)
+	if err != nil {
+		log.Printf("error parsing file: %s", err)
+		return false
+	}
+
+	// Traverse the AST to find the struct declaration
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok || genDecl.Tok != token.TYPE {
+			continue
+		}
+
+		for _, spec := range genDecl.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok || typeSpec.Name.Name != t.Name() {
+				continue
+			}
+
+			// Check for the @go2proto comment
+			if genDecl.Doc != nil {
+				for _, comment := range genDecl.Doc.List {
+					if strings.Contains(comment.Text, "@go2proto") {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 func appendMessage(out []*message, t types.Object, s *types.Struct) []*message {
