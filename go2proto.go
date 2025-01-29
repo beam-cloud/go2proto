@@ -202,11 +202,20 @@ func gatherConstValues(files []*ast.File) map[string][]string {
 						typeName = ident.Name
 					}
 				}
-				for _, name := range vspec.Names {
-					// if no typeName, we skip
-					if typeName != "" {
-						result[typeName] = append(result[typeName], name.Name)
+				if typeName == "" {
+					// If there's no explicit type, skip
+					continue
+				}
+				for i, name := range vspec.Names {
+					// Default to the identifier name in case there's no assigned value
+					valStr := name.Name
+					// If we have a literal and it's a string, take that as the actual value
+					if i < len(vspec.Values) {
+						if lit, ok := vspec.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+							valStr = strings.Trim(lit.Value, `"`)
+						}
 					}
+					result[typeName] = append(result[typeName], valStr)
 				}
 			}
 		}
