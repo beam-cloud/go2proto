@@ -136,8 +136,7 @@ func getMessages(pkgs []*packages.Package, filter string) []*message {
 
 // Function to check if a struct has the @go2proto comment
 func hasGo2ProtoComment(fset *token.FileSet, t types.Object) bool {
-	// Get the position of the object
-	pos := t.Pos()
+	pos := t.Pos() // Get the position of the object
 	if !pos.IsValid() {
 		return false
 	}
@@ -152,7 +151,7 @@ func hasGo2ProtoComment(fset *token.FileSet, t types.Object) bool {
 		return false
 	}
 
-	// Traverse the AST to find the struct declaration
+	// Traverse AST and find the struct declaration
 	for _, decl := range file.Decls {
 		genDecl, ok := decl.(*ast.GenDecl)
 		if !ok || genDecl.Tok != token.TYPE {
@@ -165,7 +164,7 @@ func hasGo2ProtoComment(fset *token.FileSet, t types.Object) bool {
 				continue
 			}
 
-			// Check for the @go2proto comment
+			// Check for a @go2proto comment
 			if genDecl.Doc != nil {
 				for _, comment := range genDecl.Doc.List {
 					if strings.Contains(comment.Text, "@go2proto") {
