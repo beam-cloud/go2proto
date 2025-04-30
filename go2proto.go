@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"text/template"
@@ -304,6 +305,14 @@ func appendMessage(def types.Object, s *types.Struct) *message {
 		if !fld.Exported() {
 			continue
 		}
+
+		if tag := s.Tag(i); tag != "" {
+			st := reflect.StructTag(strings.Trim(tag, "`"))
+			if st.Get("go2proto") == "ignore" {
+				continue // skip this field
+			}
+		}
+
 		fd := &field{
 			Name:       toProtoFieldName(fld.Name()),
 			Order:      i + 1,

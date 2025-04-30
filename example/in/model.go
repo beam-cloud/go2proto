@@ -51,4 +51,5 @@ type EventFieldItem struct {
 	FloatField1      float32
 	FloatField2      float64
 	ItemType         EventFieldItemType
+	IgnoreThisField  int `go2proto:"ignore"`
 }
